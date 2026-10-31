@@ -43,8 +43,8 @@ describe("Twitch extension viewer channel authorization", () => {
 
   it("rejects reads and clue submissions when the mapped broadcaster owns another session", async () => {
     const ctx = setup();
-    const owner = await makeStreamer(ctx.services, { demo: true });
-    const other = await makeStreamer(ctx.services, { demo: true });
+    const owner = await makeStreamer(ctx.services);
+    const other = await makeStreamer(ctx.services);
     const sessionId = await createSession(ctx.app, owner);
     const auth = authorizeExtension(other.connection.twitchUserId);
 
@@ -56,7 +56,7 @@ describe("Twitch extension viewer channel authorization", () => {
 
   it("allows a mapped extension viewer to read and submit to that broadcaster's session", async () => {
     const ctx = setup();
-    const streamer = await makeStreamer(ctx.services, { demo: true });
+    const streamer = await makeStreamer(ctx.services);
     const sessionId = await createSession(ctx.app, streamer);
     const auth = authorizeExtension(streamer.connection.twitchUserId);
 
@@ -65,6 +65,18 @@ describe("Twitch extension viewer channel authorization", () => {
     const read = await request(ctx.app).get(`/api/viewer/sessions/${sessionId}`).set(auth).expect(200);
     expect(read.body.session.id).toBe(sessionId);
     await request(ctx.app).post(`/api/sessions/${sessionId}/submissions`).set(auth).send({ text: "look behind the gate" }).expect(201);
+  });
+
+  it("does not treat a demo connection as a mapped Twitch broadcaster", async () => {
+    const ctx = setup();
+    const streamer = await makeStreamer(ctx.services, { demo: true });
+    const sessionId = await createSession(ctx.app, streamer);
+    const auth = authorizeExtension(streamer.connection.twitchUserId);
+
+    const read = await request(ctx.app).get(`/api/viewer/sessions/${sessionId}`).set(auth).expect(401);
+    expect(read.body.code).toBe("CHANNEL_UNKNOWN");
+    const submit = await request(ctx.app).post(`/api/sessions/${sessionId}/submissions`).set(auth).send({ text: "look behind the gate" }).expect(401);
+    expect(submit.body.code).toBe("CHANNEL_UNKNOWN");
   });
 
   it("rejects unbound anonymous tokens and does not issue demo links for live sessions", async () => {

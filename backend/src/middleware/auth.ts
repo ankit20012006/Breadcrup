@@ -71,7 +71,7 @@ export function requireViewer(repo: Repository): RequestHandler {
     const ext = await verifyExtensionJwt(token);
     if (ext) {
       const connection = await repo.getConnectionByTwitchId(ext.channelId);
-      if (!connection) {
+      if (!connection || connection.isDemo) {
         return next(new HttpError(401, "This Twitch channel has not connected Breadcrumb", "CHANNEL_UNKNOWN"));
       }
       req.viewer = {

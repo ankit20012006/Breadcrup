@@ -154,6 +154,32 @@ describe("EventSub WebSocket client", () => {
     manager.stopAll();
   });
 
+  it("clears a pending subscription retry when its WebSocket closes", async () => {
+    const repo = new MemoryRepository();
+    const connection = await liveConnection(repo);
+    let firstSocket: WebSocket | null = null;
+    let sessionNumber = 0;
+    const subscribe = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, data: null, error: "temporary outage" })
+      .mockResolvedValueOnce({ ok: true, status: 202, data: null, error: null });
+    const url = wsServer((ws) => {
+      sessionNumber++;
+      if (sessionNumber === 1) firstSocket = ws;
+      ws.send(welcome(sessionNumber === 1 ? "closed-session" : "fresh-session"));
+    });
+    const manager = new EventSubManager(repo, new TwitchTokenManager(repo), () => undefined, url, subscribe);
+
+    await manager.start(connection);
+    await until(() => subscribe.mock.calls.length === 1);
+    firstSocket!.close();
+    await until(() => manager.status(connection.id).subscribed);
+
+    expect(sessionNumber).toBe(2);
+    expect(subscribe.mock.calls.map((call) => call[3])).toEqual(["closed-session", "fresh-session"]);
+    manager.stopAll();
+  });
+
   it("opens a fresh EventSub session after bounded subscription retries are exhausted", async () => {
     const repo = new MemoryRepository();
     const connection = await liveConnection(repo);

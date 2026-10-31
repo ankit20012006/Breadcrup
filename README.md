@@ -284,7 +284,7 @@ The overlay only ever receives `PublicOverlayState`: game title, session status,
    - build: `npm ci --include=dev && npm run build -w backend`
    - start: `npm run start -w backend`
    - health check: `/health`
-   - Set `NODE_ENV=production`, `DEMO_MODE=false` (or `true` for a public demo), `APP_JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `FRONTEND_URL` (your Vercel URL), and `PUBLIC_API_URL`. `TOKEN_ENCRYPTION_KEY` is also required when Twitch is configured. Production refuses to start without the required JWT and Supabase settings rather than silently using in-memory storage. Anonymous viewer links are available only in explicit demo mode and only for demo sessions.
+   - Set `NODE_ENV=production`, `DEMO_MODE=false` (or `true` for a public demo), `APP_JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `FRONTEND_URL` (one or more HTTPS origins, such as your Vercel URL), and `PUBLIC_API_URL`. `TOKEN_ENCRYPTION_KEY` is also required when Twitch is configured. Production refuses to start without the JWT, Supabase settings, or secure frontend origins rather than silently using in-memory storage. Anonymous viewer links are available only in explicit demo mode and only for demo sessions.
    - Use an always-on instance. Sleeping free instances drop the chat and overlay connections.
 3. **Frontend → Vercel.** Import the repo and set **Root Directory = `frontend`**. Vercel detects the npm workspace and installs from the repo root, which `@breadcrumb/shared` needs. Set `NEXT_PUBLIC_API_URL=https://<your-api-host>`.
 4. **Twitch:** add the production redirect URL to the Twitch app and update the extension's URLs and allowlist.

@@ -6,6 +6,7 @@ import type { TwitchTokenManager } from "./tokenManager";
 const EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30";
 const PRIVILEGED_BADGES = new Set(["broadcaster", "moderator", "vip", "lead_moderator"]);
 const MAX_SUBSCRIPTION_RETRIES = 3;
+const MAX_SUBSCRIPTION_FAILURE_CYCLES = 6;
 
 export interface IncomingChatMessage {
   twitchMessageId: string;
@@ -89,6 +90,7 @@ class EventSubClient {
   private subscribed = false;
   private attempts = 0;
   private subscriptionRetries = 0;
+  private subscriptionFailureCycles = 0;
   private subscribingSocket: WebSocket | null = null;
   private lastError: string | null = null;
   private seen: string[] = [];
@@ -166,8 +168,10 @@ class EventSubClient {
 
     ws.on("close", (code) => {
       if (this.ws !== ws && this.ws !== null) return; // superseded by a reconnect hand-over
+      if (this.ws === ws) this.ws = null;
       this.subscribed = false;
       this.clearKeepalive();
+      this.clearSubscriptionRetry();
       if (this.stopped) return;
       this.lastError = `Chat connection closed (code ${code}); reconnecting`;
       this.scheduleFreshConnect();
@@ -180,9 +184,9 @@ class EventSubClient {
     this.ws = ws;
   }
 
-  private scheduleFreshConnect() {
+  private scheduleFreshConnect(delayOverride?: number) {
     if (this.stopped || this.reconnectTimer) return;
-    const delay = Math.min(60_000, 1000 * 2 ** this.attempts++);
+    const delay = delayOverride ?? Math.min(60_000, 1000 * 2 ** this.attempts++);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect(this.baseUrl);
@@ -191,7 +195,7 @@ class EventSubClient {
   }
 
   private async subscribe(sessionId: string, ws: WebSocket) {
-    if (this.stopped || this.ws !== ws || this.subscribed || this.subscribingSocket === ws) return;
+    if (this.stopped || this.ws !== ws || ws.readyState !== WebSocket.OPEN || this.subscribed || this.subscribingSocket === ws) return;
     this.subscribingSocket = ws;
     try {
       const connection = await this.repo.getConnection(this.connectionId);
@@ -206,6 +210,7 @@ class EventSubClient {
       if (res.status === 409 && /already exists|already subscribed/i.test(res.error ?? "")) {
         this.subscribed = true;
         this.subscriptionRetries = 0;
+        this.subscriptionFailureCycles = 0;
         this.lastError = null;
         console.log(`[eventsub] chat subscription already active for ${connection.login}`);
         return;
@@ -222,6 +227,7 @@ class EventSubClient {
       }
       this.subscribed = true;
       this.subscriptionRetries = 0;
+      this.subscriptionFailureCycles = 0;
       this.lastError = null;
       console.log(`[eventsub] listening to chat for ${connection.login}`);
     } catch (err) {
@@ -233,15 +239,24 @@ class EventSubClient {
   }
 
   private retrySubscription(sessionId: string, ws: WebSocket, message: string) {
+    if (this.stopped || this.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
     this.lastError = message;
     if (this.subscriptionRetries >= MAX_SUBSCRIPTION_RETRIES) {
+      this.subscriptionRetries = 0;
+      this.subscriptionFailureCycles++;
+      if (this.subscriptionFailureCycles > MAX_SUBSCRIPTION_FAILURE_CYCLES) {
+        this.lastError = `${message}; automatic recovery paused after repeated failures`;
+        console.error(`[eventsub] ${this.lastError}`);
+        return;
+      }
+      const delay = Math.min(60_000, 1000 * 2 ** (this.subscriptionFailureCycles - 1));
       console.error(`[eventsub] ${message}; reconnecting to obtain a fresh subscription session`);
       this.subscribed = false;
       this.clearKeepalive();
       if (this.ws === ws) this.ws = null;
       ws.removeAllListeners("close");
       ws.terminate();
-      this.scheduleFreshConnect();
+      this.scheduleFreshConnect(delay);
       return;
     }
 

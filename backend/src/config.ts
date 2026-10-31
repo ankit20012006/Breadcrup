@@ -23,7 +23,7 @@ const envSchema = z.object({
   NODE_ENV: z.string().default("development"),
   PORT: int(4000),
   /** Comma-separated list of allowed browser origins. */
-  FRONTEND_URL: z.string().default("http://localhost:3000"),
+  FRONTEND_URL: optionalString,
   PUBLIC_API_URL: z.string().default("http://localhost:4000"),
 
   DEMO_MODE: bool(true),
@@ -72,12 +72,29 @@ const env = envSchema.parse(process.env);
 
 const isProduction = env.NODE_ENV === "production";
 const twitchOAuthConfigured = Boolean(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET && env.TWITCH_REDIRECT_URI);
+const frontendOrigins = (env.FRONTEND_URL ?? "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""));
 
 if (isProduction && !env.APP_JWT_SECRET) {
   throw new Error("APP_JWT_SECRET is required in production.");
 }
 if (isProduction && (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY)) {
   throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required in production; in-memory storage is only available outside production.");
+}
+if (
+  isProduction &&
+  (!env.FRONTEND_URL ||
+    frontendOrigins.some((origin) => {
+      try {
+        const parsed = new URL(origin);
+        return parsed.protocol !== "https:" || parsed.origin !== origin;
+      } catch {
+        return true;
+      }
+    }))
+) {
+  throw new Error("FRONTEND_URL must contain one or more HTTPS origins in production.");
 }
 if (isProduction && twitchOAuthConfigured && !env.TOKEN_ENCRYPTION_KEY) {
   throw new Error("TOKEN_ENCRYPTION_KEY is required in production when Twitch OAuth is configured.");
@@ -88,8 +105,8 @@ export const config = {
   isProduction,
   isTest: env.NODE_ENV === "test",
   port: env.PORT,
-  frontendOrigins: env.FRONTEND_URL.split(",").map((o) => o.trim().replace(/\/$/, "")),
-  frontendUrl: env.FRONTEND_URL.split(",")[0]!.trim().replace(/\/$/, ""),
+  frontendOrigins,
+  frontendUrl: frontendOrigins[0]!,
   publicApiUrl: env.PUBLIC_API_URL.replace(/\/$/, ""),
 
   demoMode: env.DEMO_MODE,

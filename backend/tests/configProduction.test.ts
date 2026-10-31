@@ -6,6 +6,7 @@ function importProductionConfig(overrides: Record<string, string>) {
   const env = {
     ...process.env,
     NODE_ENV: "production",
+    FRONTEND_URL: "https://breadcrumb.example",
     APP_JWT_SECRET: "test-only-jwt-secret",
     TOKEN_ENCRYPTION_KEY: "",
     SUPABASE_URL: "",
@@ -23,6 +24,32 @@ function importProductionConfig(overrides: Record<string, string>) {
 }
 
 describe("production persistence configuration", () => {
+  it("accepts configured Supabase credentials", () => {
+    const result = importProductionConfig({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "test-only-service-role-key",
+    });
+    expect(result.status).toBe(0);
+  });
+
+  it("fails clearly when FRONTEND_URL is missing or not an HTTPS origin", () => {
+    const missing = importProductionConfig({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "test-only-service-role-key",
+      FRONTEND_URL: "",
+    });
+    expect(missing.status).not.toBe(0);
+    expect(missing.stderr).toContain("FRONTEND_URL must contain one or more HTTPS origins in production");
+
+    const insecure = importProductionConfig({
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "test-only-service-role-key",
+      FRONTEND_URL: "http://breadcrumb.example",
+    });
+    expect(insecure.status).not.toBe(0);
+    expect(insecure.stderr).toContain("FRONTEND_URL must contain one or more HTTPS origins in production");
+  });
+
   it("fails clearly when Supabase credentials are missing", () => {
     const result = importProductionConfig({});
     expect(result.status).not.toBe(0);
