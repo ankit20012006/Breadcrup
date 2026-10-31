@@ -1,0 +1,44 @@
+# Render Blueprint for the Breadcrumb API (Express + Socket.IO + EventSub WebSockets).
+# A persistent web service is required: Socket.IO and the EventSub client hold long-lived connections,
+# so serverless platforms are not suitable for the backend.
+services:
+  - type: web
+    name: breadcrumb-api
+    runtime: node
+    plan: starter # free instances sleep, which drops live chat and overlay sockets
+    buildCommand: npm ci --include=dev && npm run build -w backend
+    startCommand: npm run start -w backend
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22
+      - key: DEMO_MODE
+        value: "false"
+      - key: APP_JWT_SECRET
+        generateValue: true
+      - key: TOKEN_ENCRYPTION_KEY
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false # e.g. https://breadcrumb.vercel.app
+      - key: PUBLIC_API_URL
+        sync: false # e.g. https://breadcrumb-api.onrender.com
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: TWITCH_CLIENT_ID
+        sync: false
+      - key: TWITCH_CLIENT_SECRET
+        sync: false
+      - key: TWITCH_REDIRECT_URI
+        sync: false # https://<api-host>/api/auth/twitch/callback
+      - key: TWITCH_EXTENSION_CLIENT_ID
+        sync: false
+      - key: TWITCH_EXTENSION_SECRET
+        sync: false

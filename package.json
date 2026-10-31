@@ -1,0 +1,32 @@
+{
+  "name": "breadcrumb",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Breadcrumb — spoiler-safe hints, chat guard and chat pulse for Twitch streamers.",
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c yellow,magenta \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "dev:backend": "npm run dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "start": "concurrently -k -n api,web -c yellow,magenta \"npm run start -w backend\" \"npm run start -w frontend\"",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w backend && npm run typecheck -w frontend",
+    "test": "npm run test -w backend",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "smoke": "node scripts/smoke.mjs",
+    "e2e": "node scripts/e2e-browser.mjs",
+    "e2e:browser": "node scripts/e2e-browser.mjs",
+    "smoke:openai": "npm run smoke:openai -w backend --"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20.9"
+  }
+}
