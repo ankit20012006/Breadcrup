@@ -144,7 +144,7 @@ breadcrumb/
 | Sign-in | "Explore demo mode" plus Twitch (if configured) | Twitch OAuth only |
 | Chat | Simulated, tagged `demo` | Twitch EventSub `channel.chat.message`, tagged `live` |
 | Deletion | Simulated and labelled; no API call | `DELETE /helix/moderation/chat`; the real HTTP status is recorded |
-| Viewers | Anonymous viewer tokens allowed | Twitch Extension JWT (anonymous links only if `ALLOW_ANONYMOUS_VIEWERS=true`) |
+| Viewers | Anonymous viewer tokens for demo sessions | Twitch Extension JWT mapped to the connected broadcaster |
 | Demo controls | Simulate clue / spam | Refused (403) for real Twitch accounts |
 
 AI and storage are configured independently of the mode. Set the OpenAI or Supabase variables in either mode. The dashboard header always shows which AI provider and store are active.
@@ -241,7 +241,7 @@ Scopes requested at login (checked against Twitch's API reference):
 How the integration behaves:
 - The broadcaster acts as their own moderator, so `moderator_id` is the broadcaster's ID.
 - Twitch only allows deleting messages younger than 6 hours, and never the broadcaster's own or other moderators' messages. Breadcrumb checks message age first and records Twitch's actual error otherwise.
-- The EventSub client subscribes within Twitch's 10-second window after `session_welcome` and handles `session_reconnect` hand-over, keepalive timeouts (reconnect plus resubscribe with backoff) and `revocation`. Redelivered notifications are de-duplicated.
+- The EventSub client subscribes within Twitch's 10-second window after `session_welcome`, retries transient subscription failures with a bounded backoff, and obtains a fresh session if retries are exhausted. It handles `session_reconnect` hand-over, keepalive timeouts and `revocation`; duplicate-subscription responses are treated as already active. Redelivered notifications are de-duplicated.
 - Access tokens are refreshed automatically before expiry and retried once on a 401. "Disconnect" revokes the token at `id.twitch.tv/oauth2/revoke`.
 - The dashboard's stored Breadcrumb session determines the displayed account. If it says **Demo account**, choose **Connect Twitch** in the header to replace that session through OAuth. **App realtime** is Breadcrumb's Socket.IO connection and does not indicate Twitch chat status; **Twitch EventSub** reports the separate live-chat subscription.
 - After Twitch redirects back, Breadcrumb loads `/api/auth/me` for the authorized broadcaster profile. Verify **Twitch: <login> · EventSub connected**, then send a new chat message in that channel and confirm it appears as a `live` chat message in Chat Guard. Demo chat remains isolated and never contacts Twitch.
@@ -249,7 +249,7 @@ How the integration behaves:
 ### Twitch Extension (viewer panel)
 
 The `/extension` page works in two ways:
-- **Standalone:** `/extension?session=<id>`, for demo use or live with `ALLOW_ANONYMOUS_VIEWERS=true`.
+- **Standalone:** `/extension?session=<id>`, for demo sessions only. Anonymous viewer links are disabled outside explicit demo mode.
 - **Inside Twitch's extension iframe:** it loads Twitch's extension helper, gets the JWT from `onAuthorized`, and the backend verifies it with `TWITCH_EXTENSION_SECRET` (HS256, base64-decoded). The viewer is identified by `opaque_user_id` and the channel by `channel_id`.
 
 **Local Test setup** (Twitch Developer Console → Extensions):
@@ -284,7 +284,7 @@ The overlay only ever receives `PublicOverlayState`: game title, session status,
    - build: `npm ci --include=dev && npm run build -w backend`
    - start: `npm run start -w backend`
    - health check: `/health`
-   - Set `NODE_ENV=production`, `DEMO_MODE=false` (or `true` for a public demo), `APP_JWT_SECRET`, `TOKEN_ENCRYPTION_KEY`, `FRONTEND_URL` (your Vercel URL), `PUBLIC_API_URL`, plus the Supabase, OpenAI and Twitch variables. The server refuses to start in production without `APP_JWT_SECRET`, or without `TOKEN_ENCRYPTION_KEY` when Twitch is configured.
+   - Set `NODE_ENV=production`, `DEMO_MODE=false` (or `true` for a public demo), `APP_JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `FRONTEND_URL` (your Vercel URL), and `PUBLIC_API_URL`. `TOKEN_ENCRYPTION_KEY` is also required when Twitch is configured. Production refuses to start without the required JWT and Supabase settings rather than silently using in-memory storage. Anonymous viewer links are available only in explicit demo mode and only for demo sessions.
    - Use an always-on instance. Sleeping free instances drop the chat and overlay connections.
 3. **Frontend → Vercel.** Import the repo and set **Root Directory = `frontend`**. Vercel detects the npm workspace and installs from the repo root, which `@breadcrumb/shared` needs. Set `NEXT_PUBLIC_API_URL=https://<your-api-host>`.
 4. **Twitch:** add the production redirect URL to the Twitch app and update the extension's URLs and allowlist.

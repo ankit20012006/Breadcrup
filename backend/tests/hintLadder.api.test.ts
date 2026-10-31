@@ -61,6 +61,7 @@ describe("Hint Ladder API", () => {
     // Overlay starts empty.
     const empty = await request(ctx.app).get(`/api/sessions/${sessionId}/overlay`).expect(200);
     expect(empty.body.revealed).toBeNull();
+    expect(JSON.stringify(empty.body)).not.toMatch(/SECRET-T[123]|wall behind the gargoyle/);
 
     const gen = await request(ctx.app).post(`/api/sessions/${sessionId}/generate`).set(streamer.auth).send({}).expect(200);
     const set: HintSet = gen.body.hintSet;
@@ -72,10 +73,11 @@ describe("Hint Ladder API", () => {
     const blocked = await request(ctx.app).post(`/api/sessions/${sessionId}/reveal-next`).set(streamer.auth).expect(409);
     expect(blocked.body.code).toBe("NOT_APPROVED");
 
-    // Approving tier 1 doesn't put anything on the overlay by itself.
+    // Neither generated nor approved hints are public until explicitly revealed.
     await request(ctx.app).post(`/api/sessions/${sessionId}/tiers/decision`).set(streamer.auth).send({ tier: 1, decision: "approved" }).expect(200);
     const stillEmpty = await request(ctx.app).get(`/api/sessions/${sessionId}/overlay`).expect(200);
     expect(stillEmpty.body.revealed).toBeNull();
+    expect(JSON.stringify(stillEmpty.body)).not.toMatch(/SECRET-T[123]|wall behind the gargoyle/);
 
     const reveal = await request(ctx.app).post(`/api/sessions/${sessionId}/reveal-next`).set(streamer.auth).expect(200);
     expect(reveal.body.session.currentRevealedTier).toBe(1);

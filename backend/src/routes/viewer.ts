@@ -17,11 +17,11 @@ export function viewerRoutes(s: Services): Router {
   const tokenLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: "draft-8", legacyHeaders: false });
 
   /**
-   * Anonymous viewer tokens for use outside the Twitch extension iframe (demo, or
-   * live when ALLOW_ANONYMOUS_VIEWERS=true). Inside Twitch, the extension JWT is used.
+   * Anonymous viewer tokens are limited to demo sessions. Inside Twitch, the
+   * extension JWT is used and must map to a connected Breadcrumb broadcaster.
    */
   r.post("/token", tokenLimiter, async (req, res) => {
-    if (!config.allowAnonymousViewers) {
+    if (!config.demoMode || !config.allowAnonymousViewers) {
       throw new HttpError(403, "Open this panel from the Twitch extension to submit clues", "ANON_DISABLED");
     }
     const { sessionId } = tokenRequest.parse(req.body ?? {});
@@ -29,6 +29,10 @@ export function viewerRoutes(s: Services): Router {
     if (sessionId) {
       const session = await s.repo.getSession(sessionId);
       if (!session) throw new HttpError(404, "Session not found", "NOT_FOUND");
+      const connection = await s.repo.getConnection(session.streamerId);
+      if (!connection?.isDemo) {
+        throw new HttpError(403, "Anonymous viewer links are only available for demo sessions", "ANON_DISABLED");
+      }
       channel = session.streamerId;
     } else if (config.demoMode) {
       channel = (await s.demo.ensureDemoStreamer()).id;

@@ -5,6 +5,7 @@ import type { TwitchTokenManager } from "./tokenManager";
 
 const EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws?keepalive_timeout_seconds=30";
 const PRIVILEGED_BADGES = new Set(["broadcaster", "moderator", "vip", "lead_moderator"]);
+const MAX_SUBSCRIPTION_RETRIES = 3;
 
 export interface IncomingChatMessage {
   twitchMessageId: string;
@@ -81,10 +82,14 @@ export class EventSubManager {
 class EventSubClient {
   private ws: WebSocket | null = null;
   private keepaliveTimer: NodeJS.Timeout | null = null;
+  private subscriptionRetryTimer: NodeJS.Timeout | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
   private keepaliveSeconds = 30;
   private stopped = false;
   private subscribed = false;
   private attempts = 0;
+  private subscriptionRetries = 0;
+  private subscribingSocket: WebSocket | null = null;
   private lastError: string | null = null;
   private seen: string[] = [];
 
@@ -104,6 +109,9 @@ class EventSubClient {
   stop() {
     this.stopped = true;
     this.clearKeepalive();
+    this.clearSubscriptionRetry();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.ws?.close();
   }
 
@@ -126,14 +134,16 @@ class EventSubClient {
       if (type === "session_welcome") {
         this.ws = ws;
         this.attempts = 0;
+        if (!isReconnect) this.subscriptionRetries = 0;
         this.keepaliveSeconds = msg.payload?.session?.keepalive_timeout_seconds ?? this.keepaliveSeconds;
         if (isReconnect) {
           previous?.removeAllListeners("close");
           previous?.close();
-        } else {
-          void this.subscribe(msg.payload.session.id);
         }
+        if (!this.subscribed) void this.subscribe(msg.payload.session.id, ws);
       } else if (type === "session_reconnect") {
+        this.clearSubscriptionRetry();
+        if (!this.subscribed) this.subscriptionRetries = 0;
         this.connect(msg.payload.session.reconnect_url, true);
       } else if (type === "notification" && msg.metadata.subscription_type === "channel.chat.message") {
         if (this.isRepeat(msg.metadata.message_id)) return;
@@ -167,15 +177,22 @@ class EventSubClient {
       this.lastError = `Chat connection error: ${err.message}`;
     });
 
-    if (!isReconnect) this.ws = ws;
+    this.ws = ws;
   }
 
   private scheduleFreshConnect() {
+    if (this.stopped || this.reconnectTimer) return;
     const delay = Math.min(60_000, 1000 * 2 ** this.attempts++);
-    setTimeout(() => this.connect(this.baseUrl), delay).unref();
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect(this.baseUrl);
+    }, delay);
+    this.reconnectTimer.unref();
   }
 
-  private async subscribe(sessionId: string) {
+  private async subscribe(sessionId: string, ws: WebSocket) {
+    if (this.stopped || this.ws !== ws || this.subscribed || this.subscribingSocket === ws) return;
+    this.subscribingSocket = ws;
     try {
       const connection = await this.repo.getConnection(this.connectionId);
       if (!connection) return this.stop();
@@ -185,14 +202,60 @@ class EventSubClient {
         token = await this.tokens.getAccessToken(connection, { forceRefresh: true });
         res = await this.createSubscription(token, connection.twitchUserId, connection.twitchUserId, sessionId);
       }
-      if (!res.ok) throw new Error(`Subscription failed (${res.status}): ${res.error}`);
+      if (this.stopped || this.ws !== ws) return;
+      if (res.status === 409 && /already exists|already subscribed/i.test(res.error ?? "")) {
+        this.subscribed = true;
+        this.subscriptionRetries = 0;
+        this.lastError = null;
+        console.log(`[eventsub] chat subscription already active for ${connection.login}`);
+        return;
+      }
+      if (!res.ok) {
+        const message = `Subscription failed (${res.status}): ${res.error}`;
+        if (res.status === 0 || res.status === 429 || res.status >= 500) {
+          this.retrySubscription(sessionId, ws, message);
+          return;
+        }
+        this.lastError = message;
+        console.error(`[eventsub] ${this.lastError}`);
+        return;
+      }
       this.subscribed = true;
+      this.subscriptionRetries = 0;
       this.lastError = null;
       console.log(`[eventsub] listening to chat for ${connection.login}`);
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
-      console.error(`[eventsub] ${this.lastError}`);
+      if (this.stopped || this.ws !== ws) return;
+      this.retrySubscription(sessionId, ws, err instanceof Error ? err.message : String(err));
+    } finally {
+      if (this.subscribingSocket === ws) this.subscribingSocket = null;
     }
+  }
+
+  private retrySubscription(sessionId: string, ws: WebSocket, message: string) {
+    this.lastError = message;
+    if (this.subscriptionRetries >= MAX_SUBSCRIPTION_RETRIES) {
+      console.error(`[eventsub] ${message}; reconnecting to obtain a fresh subscription session`);
+      this.subscribed = false;
+      this.clearKeepalive();
+      if (this.ws === ws) this.ws = null;
+      ws.removeAllListeners("close");
+      ws.terminate();
+      this.scheduleFreshConnect();
+      return;
+    }
+
+    const delay = 250 * 2 ** this.subscriptionRetries++;
+    this.subscriptionRetryTimer = setTimeout(() => {
+      this.subscriptionRetryTimer = null;
+      void this.subscribe(sessionId, ws);
+    }, delay);
+    this.subscriptionRetryTimer.unref();
+  }
+
+  private clearSubscriptionRetry() {
+    if (this.subscriptionRetryTimer) clearTimeout(this.subscriptionRetryTimer);
+    this.subscriptionRetryTimer = null;
   }
 
   private armKeepalive() {

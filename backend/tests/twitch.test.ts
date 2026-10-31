@@ -135,6 +135,83 @@ describe("EventSub WebSocket client", () => {
     manager.stopAll();
   });
 
+  it("retries transient subscription failures on the same session and recovers without duplicates", async () => {
+    const repo = new MemoryRepository();
+    const connection = await liveConnection(repo);
+    const subscribe = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, data: null, error: "temporary outage" })
+      .mockResolvedValueOnce({ ok: true, status: 202, data: null, error: null });
+    const url = wsServer((ws) => ws.send(welcome("retry-session")));
+    const manager = new EventSubManager(repo, new TwitchTokenManager(repo), () => undefined, url, subscribe);
+
+    await manager.start(connection);
+    await until(() => manager.status(connection.id).subscribed);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(subscribe).toHaveBeenCalledTimes(2);
+    expect(subscribe.mock.calls.map((call) => call[3])).toEqual(["retry-session", "retry-session"]);
+    manager.stopAll();
+  });
+
+  it("opens a fresh EventSub session after bounded subscription retries are exhausted", async () => {
+    const repo = new MemoryRepository();
+    const connection = await liveConnection(repo);
+    const subscribe = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, data: null, error: "temporary outage" })
+      .mockResolvedValueOnce({ ok: false, status: 503, data: null, error: "temporary outage" })
+      .mockResolvedValueOnce({ ok: false, status: 503, data: null, error: "temporary outage" })
+      .mockResolvedValueOnce({ ok: false, status: 503, data: null, error: "temporary outage" })
+      .mockResolvedValueOnce({ ok: true, status: 202, data: null, error: null });
+    let sessionNumber = 0;
+    const url = wsServer((ws) => ws.send(welcome(`retry-session-${++sessionNumber}`)));
+    const manager = new EventSubManager(repo, new TwitchTokenManager(repo), () => undefined, url, subscribe);
+
+    await manager.start(connection);
+    await until(() => manager.status(connection.id).subscribed, 7000);
+
+    expect(sessionNumber).toBe(2);
+    expect(subscribe.mock.calls.map((call) => call[3])).toEqual([
+      "retry-session-1",
+      "retry-session-1",
+      "retry-session-1",
+      "retry-session-1",
+      "retry-session-2",
+    ]);
+    manager.stopAll();
+  });
+
+  it("treats Twitch's duplicate-subscription response as already subscribed", async () => {
+    const repo = new MemoryRepository();
+    const connection = await liveConnection(repo);
+    const subscribe = vi.fn(async () => ({ ok: false, status: 409, data: null, error: "subscription already exists" }));
+    const url = wsServer((ws) => ws.send(welcome("existing-session")));
+    const manager = new EventSubManager(repo, new TwitchTokenManager(repo), () => undefined, url, subscribe);
+
+    await manager.start(connection);
+    await until(() => manager.status(connection.id).subscribed);
+
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    manager.stopAll();
+  });
+
+  it("does not retry permanent subscription failures", async () => {
+    const repo = new MemoryRepository();
+    const connection = await liveConnection(repo);
+    const subscribe = vi.fn(async () => ({ ok: false, status: 403, data: null, error: "missing permission" }));
+    const url = wsServer((ws) => ws.send(welcome("permanent-failure-session")));
+    const manager = new EventSubManager(repo, new TwitchTokenManager(repo), () => undefined, url, subscribe);
+
+    await manager.start(connection);
+    await until(() => manager.status(connection.id).lastError !== null);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(manager.status(connection.id)).toMatchObject({ connected: true, subscribed: false });
+    manager.stopAll();
+  });
+
   it("does not connect accounts missing the user:read:chat scope", async () => {
     const repo = new MemoryRepository();
     const connection = await repo.upsertConnection({ ...(await liveConnection(repo)), twitchUserId: "2", scopes: [] });

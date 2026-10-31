@@ -76,6 +76,9 @@ const twitchOAuthConfigured = Boolean(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_
 if (isProduction && !env.APP_JWT_SECRET) {
   throw new Error("APP_JWT_SECRET is required in production.");
 }
+if (isProduction && (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY)) {
+  throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required in production; in-memory storage is only available outside production.");
+}
 if (isProduction && twitchOAuthConfigured && !env.TOKEN_ENCRYPTION_KEY) {
   throw new Error("TOKEN_ENCRYPTION_KEY is required in production when Twitch OAuth is configured.");
 }
@@ -91,11 +94,11 @@ export const config = {
 
   demoMode: env.DEMO_MODE,
   demoChatSimulator: env.DEMO_CHAT_SIMULATOR,
-  /** Anonymous (non-extension) viewers default to on in demo mode, off in live mode. */
+  /** Anonymous viewer links are restricted to the explicit demo mode. */
   allowAnonymousViewers:
-    env.ALLOW_ANONYMOUS_VIEWERS === undefined
-      ? env.DEMO_MODE
-      : ["1", "true", "yes", "on"].includes(env.ALLOW_ANONYMOUS_VIEWERS.toLowerCase()),
+    env.DEMO_MODE &&
+    (env.ALLOW_ANONYMOUS_VIEWERS === undefined ||
+      ["1", "true", "yes", "on"].includes(env.ALLOW_ANONYMOUS_VIEWERS.toLowerCase())),
 
   // A random per-process secret is acceptable for local dev only (enforced above for prod).
   jwtSecret: env.APP_JWT_SECRET ?? `dev-only-${Math.random().toString(36).slice(2)}${Date.now()}`,

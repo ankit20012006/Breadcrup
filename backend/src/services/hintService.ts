@@ -86,7 +86,7 @@ export class HintService {
   ): Promise<Pick<HintSubmission, "id" | "status" | "createdAt">> {
     const session = await this.repo.getSession(sessionId);
     if (!session) throw new HttpError(404, "Session not found", "NOT_FOUND");
-    if (viewer.channelConnectionId && viewer.channelConnectionId !== session.streamerId) {
+    if (viewer.channelConnectionId !== session.streamerId) {
       throw new HttpError(403, "This session belongs to a different channel", "WRONG_CHANNEL");
     }
     if (session.status !== "collecting") throw new HttpError(409, "This hint session is closed", "SESSION_CLOSED");
@@ -130,7 +130,7 @@ export class HintService {
   async viewerView(sessionId: string, viewer: ViewerIdentity) {
     const session = await this.repo.getSession(sessionId);
     if (!session) throw new HttpError(404, "Session not found", "NOT_FOUND");
-    if (viewer.channelConnectionId && viewer.channelConnectionId !== session.streamerId) {
+    if (viewer.channelConnectionId !== session.streamerId) {
       throw new HttpError(403, "This session belongs to a different channel", "WRONG_CHANNEL");
     }
     const mine = (await this.repo.listSubmissions(sessionId))
