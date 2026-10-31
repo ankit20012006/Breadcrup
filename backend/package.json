@@ -1,0 +1,41 @@
+{
+  "name": "@breadcrumb/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke:openai": "tsx scripts/openai-smoke.ts"
+  },
+  "dependencies": {
+    "@breadcrumb/shared": "*",
+    "@supabase/supabase-js": "^2.118.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jose": "^6.2.13",
+    "openai": "^7.43.0",
+    "socket.io": "^4.8.4",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.5",
+    "@types/supertest": "^6.0.3",
+    "@types/ws": "^8.18.1",
+    "socket.io-client": "^4.8.4",
+    "supertest": "^7.3.1",
+    "tsup": "^8.5.0",
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.5"
+  }
+}
